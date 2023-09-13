@@ -11,6 +11,8 @@ from utils.datasets import LoadImagesAndLabels
 from utils.datasets import img2label_paths
 from utils.general import colorstr, xywh2xyxy, check_dataset
 
+from loguru import logger
+
 try:
     import wandb
     from wandb import init, finish
@@ -89,12 +91,14 @@ class WandbLogger():
                 model_artifact_name = WANDB_ARTIFACT_PREFIX + model_artifact_name
                 assert wandb, 'install wandb to resume wandb runs'
                 # Resume wandb-artifact:// runs here| workaround for not overwriting wandb.config
-                self.wandb_run = wandb.init(id=run_id, project=project, resume='allow')
+                self.wandb_run = wandb.init(allow_val_change=True,id=run_id, project=project, resume='allow')
                 opt.resume = model_artifact_name
         elif self.wandb:
-            self.wandb_run = wandb.init(config=opt,
-                                        resume="allow",
-                                        project='YOLOR' if opt.project == 'runs/train' else Path(opt.project).stem,
+            # raise Exception('WandbLogger should be called after the resume argument is processed')
+
+            self.wandb_run = wandb.init(allow_val_change=True,
+                                        config=opt,
+                                        project=Path(opt.project).stem,
                                         name=name,
                                         job_type=job_type,
                                         id=run_id) if not wandb.run else wandb.run
