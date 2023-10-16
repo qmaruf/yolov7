@@ -34,9 +34,17 @@ from utils.loss import ComputeLoss, ComputeLossOTA
 from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
+from models.quant_yolo import static_quant
 
 logger = logging.getLogger(__name__)
 
+def quant_model(model, dataloader):
+    print('Quantization starts')
+    deploy_device = 'x86'
+    device = 'cuda'
+    quantized_model = static_quant(model, dataloader, deploy_device, device)
+    print('Quantization ends')
+    return quantized_model
 
 def train(hyp, opt, device, tb_writer=None):
     logger.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
@@ -450,10 +458,15 @@ def train(hyp, opt, device, tb_writer=None):
             wandb_logger.end_epoch(best_result=best_fitness == fi)
 
             # Save model
+
+
+
             if (not opt.nosave) or (final_epoch and not opt.evolve):  # if save
+                qmodel = quant_model(model, dataloader)
                 ckpt = {'epoch': epoch,
                         'best_fitness': best_fitness,
                         'training_results': results_file.read_text(),
+                        'quantized_model': deepcopy(qmodel.module if is_parallel(qmodel) else qmodel).half(),
                         'model': deepcopy(model.module if is_parallel(model) else model).half(),
                         'ema': deepcopy(ema.ema).half(),
                         'updates': ema.updates,
@@ -462,6 +475,11 @@ def train(hyp, opt, device, tb_writer=None):
 
                 # Save last, best and delete
                 torch.save(ckpt, last)
+                ckpt_path = wdir / 'epoch_{:03d}.pt'.format(epoch)
+                torch.save(ckpt, wdir / 'epoch_{:03d}.pt'.format(epoch))
+                logger.info(f'Saving weights to {ckpt_path}')
+                
+
                 if best_fitness == fi:
                     torch.save(ckpt, best)
                 if (best_fitness == fi) and (epoch >= 200):
@@ -655,7 +673,7 @@ if __name__ == '__main__':
                 hyp['anchors'] = 3
                 
         assert opt.local_rank == -1, 'DDP mode not implemented for --evolve'
-        opt.notest, opt.nosave = True, True  # only test/save final epoch
+        opt.notest, opt.nosave = True, False  # only test/save final epoch
         # ei = [isinstance(x, (int, float)) for x in hyp.values()]  # evolvable indices
         yaml_file = Path(opt.save_dir) / 'hyp_evolved.yaml'  # save best result here
         if opt.bucket:
